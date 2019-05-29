@@ -1,14 +1,15 @@
 #ifndef BITMAP_H
 #define BITMAP_H
 
-struct bitmap * bitmap_create( int w, int h );
-void            bitmap_delete( struct bitmap *b );
-struct bitmap * bitmap_load( const char *file );
-int             bitmap_save( struct bitmap *b, const char *file );
+#include "t2fs.h"
 
-int   bitmap_get( struct bitmap *b, int x, int y );
-void  bitmap_set( struct bitmap *b, int x, int y, int value );
-int   bitmap_width( struct bitmap *b );
-int   bitmap_height( struct bitmap *b );
-void  bitmap_reset( struct bitmap *b, int value );
-int  *bitmap_data( struct bitmap *b );
+typedef enum{BLOCK_OCCUPIED, BLOCK_FREE} en_blockState;
+
+int load_bitmap(super_block *sb);
+int bitmapInit(super_block *sb);
+void bitmap_flush(super_block *sb);
+int set_block_free(WORD block);
+int set_block_occupied(WORD block);
+int get_free_block(void);
+
+#endif

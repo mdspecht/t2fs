@@ -1,198 +1,148 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-
 #include "bitmap.h"
+#include "apidisk.h"
+#include "debug.h"
 
-struct bitmap {
-	int width;
-	int height;
-	int *data;
-};
+BYTE *Bitmap= NULL;
+WORD BitmapSize=0;
+DWORD numBlocks;
 
-struct bitmap * bitmap_create( int w, int h )
-{
-	struct bitmap *m;
 
-	m = malloc(sizeof *m);
-	if(!m) return 0;
-
-	m->data = malloc(w*h*sizeof(int));
-	if(!m->data) {
-		free(m);
-		return 0;
-	}
-
-	m->width = w;
-	m->height = h;
-
-	return m;
-}
-
-void bitmap_delete( struct bitmap *m )
-{
-	free(m->data);
-	free(m);
-}
-
-void bitmap_reset( struct bitmap *m, int value )
+void print_sector(BYTE* buffer)
 {
 	int i;
-	for(i=0;i<(m->width*m->height);i++) {
-		m->data[i] = value;
+	for(i=0;i<SECTOR_SIZE;i++){
+		debug_printf("0x%0X ", buffer[i]);
 	}
+	debug_printf("\n");
 }
 
-int bitmap_get( struct bitmap *m, int x, int y )
+int load_bitmap(super_block *sb)
 {
-	while(x>=m->width)  x-=m->width;
-	while(y>=m->height) y-=m->height;
-	while(x<0)         x+=m->width;
-	while(y<0)         y+=m->height;
-
-	return m->data[y*m->width+x];
-}
-
-void bitmap_set( struct bitmap *m, int x, int y, int value )
-{
-	while(x>=m->width)  x-=m->width;
-	while(y>=m->height) y-=m->height;
-	while(x<0)         x+=m->width;
-	while(y<0)         y+=m->height;
-
-	m->data[y*m->width+x] = value;
-}
-
-int bitmap_width( struct bitmap *m )
-{
-	return m->width;
-}
-
-int bitmap_height( struct bitmap *m )
-{
-	return m->height;
-}
-
-int * bitmap_data( struct bitmap *m )
-{
-	return m->data;
-}
-
-#pragma pack(1)
-struct bmp_header {
-	char	magic1;
-	char	magic2;
-	int	size;
-	int	reserved;
-	int	offset;
-	int	infosize;
-	int	width;
-	int	height;
-	short	planes;
-	short	bits;
-	int	compression;
-	int	imagesize;
-	int	xres;
-	int	yres;
-	int	ncolors;
-	int	icolors;
-};
-
-int bitmap_save( struct bitmap *m, const char *path )
-{
-	FILE *file;
-	struct bmp_header header;
-	int i, j;
-	unsigned char *scanline, *s;
-
-	file = fopen(path,"wb");
-	if(!file) return 0;
-
-	memset(&header,0,sizeof(header));
-	header.magic1 = 'B';
-	header.magic2 = 'M';
-	header.size   = m->width*m->height*3;
-	header.offset = sizeof(header);
-	header.infosize = sizeof(header)-14;
-	header.width = m->width;
-	header.height = m->height;
-	header.planes = 1;
-	header.bits = 24;
-	header.compression = 0;
-	header.imagesize = m->width*m->height*3;
-	header.xres = 1000;
-	header.yres = 1000;
-
-	fwrite(&header,1,sizeof(header),file);
-
-	/* if the scanline is not a multiple of four, round it up. */
-	int padlength = 4 - (m->width*3)%4;
-	if(padlength==4) padlength=0;
-
-	scanline = malloc(header.width*3);
-
-	for(j=0;j<m->height;j++) {
-		s = scanline;
-		for(i=0;i<m->width;i++) {
-			int rgba = bitmap_get(m,i,j);
-			*s++ = GET_BLUE(rgba);
-			*s++ = GET_GREEN(rgba);
-			*s++ = GET_RED(rgba);
+	BYTE buffer[SECTOR_SIZE];
+	WORD sector= sb->startSector + sb->blockSize;
+	BitmapSize= sb->numBlocks/8;
+	numBlocks= sb->numBlocks;
+	Bitmap= malloc(BitmapSize);
+	BYTE *ptr= Bitmap;
+	if(Bitmap==NULL){
+		return -1;
+	}
+	while( (ptr-Bitmap) < BitmapSize){
+		debug_printf("debug read sector: %d.\n", sector);
+		if(read_sector (sector, buffer)!=0){
+			debug_printf("error trying to read in %s.\n", __FUNCTION__);
+			return -1;
 		}
-		fwrite(scanline,1,m->width*3,file);
-		fwrite(scanline,1,padlength,file);
+		print_sector(buffer);
+
+		if(  (&Bitmap[BitmapSize] - ptr) > SECTOR_SIZE){
+			debug_printf("1: ptr:%p Bitmap:%p", ptr, Bitmap);
+			memcpy(ptr, buffer, SECTOR_SIZE);
+		}else{
+			debug_printf("2: ptr:%p Bitmap:%p", ptr, Bitmap);
+			memcpy(ptr, buffer, (&Bitmap[BitmapSize] - ptr));
+		}
+		ptr+=SECTOR_SIZE;
+		sector++;
 	}
 
-	free(scanline);
-
-	fclose(file);
-	return 1;
+	int i=0;
+	BYTE *dptr;
+	dptr= (BYTE*)Bitmap;
+	(void)dptr;
+	for(i=0;i<BitmapSize;i++){
+		if(i%4==0){
+			debug_printf(" 0x");
+		}
+		debug_printf("%02X",dptr[i]);
+	}
+	
+	return 0;
 }
 
-struct bitmap * bitmap( const char *path )
+
+int bitmapInit(super_block *sb)
 {
-	FILE *file;
-	int size;
-	struct bitmap *m;
-	struct bmp_header header;
-	int i;
-
-	file = fopen(path,"rb");
-	if(!file) return 0;
-
-	fread(&header,1,sizeof(header),file);
-
-	if(header.magic1!='B' || header.magic2!='M') {
-		printf("bitmap: %s is not a BMP file.\n",path);
-		fclose(file);
-		return 0;
+	numBlocks= sb->numBlocks;	
+	BitmapSize= sb->numBlocks/8;
+	Bitmap= malloc(BitmapSize);
+	if(Bitmap==NULL){
+		debug_printf("cant allocate in %s.\n", __FUNCTION__);
+		return -1;
 	}
+	memset(Bitmap, 0xFF, BitmapSize);
+	WORD numBitmapBlocks= 1+(BitmapSize-1)/(SECTOR_SIZE*sb->blockSize);
 
-	if(header.compression!=0 || header.bits!=24) {
-		printf("bitmap: sorry, I only support 24-bit uncompressed bitmaps.\n");
-		fclose(file);
-		return 0;
+	//set superblock position to occupied
+	set_block_occupied(0);
+
+	WORD b;
+	//set numBitmapBlocks to occupied
+	for(b=1;b<1+numBitmapBlocks;b++){
+		set_block_occupied(b);
 	}
+	bitmap_flush(sb);
 
-	m = bitmap_create(header.width,header.height);
-	if(!m) {
-		fclose(file);
-		return 0;
-	}
-
-	size = header.width*header.height;
-	for(i=0;i<size;i++) {
-		int r,g,b;
-		b = fgetc(file);
-		g = fgetc(file);
-		r = fgetc(file);
-		if(b==0 && g==0 && r==0) {
-			m->data[i] = 0;
-		} else {
-			m->data[i] = MAKE_RGBA(r,g,b,255);
-		}	
-	}
-
-	fclose(file);
-	return m;
+	return 0;
 }
+
+//save bitmap memory to disk
+void bitmap_flush(super_block *sb){
+	BYTE *ptr= Bitmap;
+	WORD sector= sb->startSector + sb->blockSize;
+	while( (ptr-Bitmap) < BitmapSize){
+		write_sector (sector, ptr);
+		ptr+=SECTOR_SIZE;
+		sector++;
+	}
+}
+
+int get_free_block(void)
+{
+	WORD block;
+	BYTE b_free;
+	WORD i;
+	for(i=0;i< BitmapSize;i++){
+		if(Bitmap[i]!=0x00){
+			for(block=0; block<8; block++){
+				b_free= (Bitmap[i] >> block) & 0x1;
+				if(b_free){
+					return 8*i+ block;
+				}
+			}
+		}
+	}
+	return -1;
+}
+
+static int out_of_range(WORD block){
+	return (block >= numBlocks);
+
+}
+
+static int mark_block(WORD block, en_blockState val){
+	if(out_of_range(block)){
+		return -1;
+	}
+
+	if(val==BLOCK_FREE){
+		Bitmap[block/8] |= 1<<(block%8);
+
+	}else{
+		Bitmap[block/8] &= ~(1<<(block%8));
+	}
+	return 0;
+}
+
+int set_block_free(WORD block){
+	return mark_block(block, BLOCK_FREE);
+}
+
+int set_block_occupied(WORD block){
+	return mark_block(block, BLOCK_OCCUPIED);
+}
+
+

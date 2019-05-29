@@ -7,6 +7,10 @@
 
 #define INVALID_PTR -1
 
+#define MAX_FILE_NAME_SIZE 32
+#define REGULAR		1
+#define DIRECTORY	2
+
 typedef int FILE2;
 typedef int DIR2;
 
@@ -16,18 +20,35 @@ typedef unsigned int DWORD; //A 32-bit unsigned integer. The range is 0 through 
 
 #pragma pack(push, 1)
 
-
-
 typedef struct {
     char id[4]; //Nome do sistema de arquivos
     WORD blockSize; 
-    DWORD partitionSize; 
+	WORD startSector;
+    DWORD numBlocks;
+	WORD bitmapStartBlock;
+	WORD root_IB;
+
 } super_block;
+
+
 
 #define NODE_DIRECTORY    0x00
 #define NODE_FILE         0x01
+
+#define FILE_DIR  		0x00
+#define FILE_REG  		0x01
+#define FILE_LINK 		0x02
+#define FILE_NO_ENTRY 	0xFF
+
+typedef struct{
+	char name[MAX_FILE_NAME_SIZE];
+	BYTE fileType;
+	WORD index_block;
+} fileEntry;
+
+
 typedef struct {
-    char name[MAX_FILE_NAME_SIZE + 1];
+    char name[MAX_FILE_NAME_SIZE];
     DWORD absolutPath;
     DWORD relativePath;
     int nodeType;   //DIRETORIO OU ARQUIVO
@@ -43,20 +64,35 @@ typedef struct{
     struct index_block *next;
 }index_block;
 
-
-
-
-/** Registro com as informa��es da entrada de diret�rio, lida com readdir2 */
-#define MAX_FILE_NAME_SIZE 255
+typedef struct{
+	DWORD startAddr;
+	DWORD endAddr;
+	char name[24];
+} PartitionEntry;
 
 typedef struct {
-    char name[MAX_FILE_NAME_SIZE + 1]; /* Nome do arquivo cuja entrada foi lida do disco      */
+	WORD version;
+	WORD sectorSize;
+	WORD partitionTableOffet;
+	WORD numPartitions;
+	PartitionEntry entry[4];
+} Mbr;
+
+#define MBR_START_SECTOR(buffer) (((Mbr*)buffer)->entry[0].startAddr)
+#define MBR_END_SECTOR(buffer) (((Mbr*)buffer)->entry[0].endAddr)
+
+/** Registro com as informa��es da entrada de diret�rio, lida com readdir2 */
+typedef struct {
+    char name[MAX_FILE_NAME_SIZE]; /* Nome do arquivo cuja entrada foi lida do disco      */
     BYTE fileType; /* Tipo do arquivo: regular (0x01) ou diret�rio (0x02) */
     DWORD fileSize; /* Numero de bytes do arquivo                          */
 } DIRENT2;
 
 #pragma pack(pop)
 
+
+
+int mount(void);
 
 /*-----------------------------------------------------------------------------
 Fun��o: Usada para identificar os desenvolvedores do T2FS.
