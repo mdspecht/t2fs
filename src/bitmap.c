@@ -1,116 +1,154 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "bitmap.h"
 #include "apidisk.h"
+#include "bitmap.h"
+
+
 #include "debug.h"
 
-BYTE *Bitmap= NULL;
-WORD BitmapSize=0;
-DWORD numBlocks;
+static int init(struct st_superBlock *sb);
+static int load(st_superBlock *sb);
+static int set_block_occupied(WORD block);
+static void store(void);
+static int get_free_block(void);
+static int mark_block(WORD block, en_blockState val);
+
+struct st_bitmap Bitmap={ 	.numBlocks			= 0,	
+							.size				= 0,	
+                            .occupationBlocks	= 0,
+                            .startSector		= 0,
+                            .mem				= NULL,
+							.init				= init,
+							.load				= load,
+							.store				= store,
+							.getFreeBlock		= get_free_block,
+							.markBlock			= mark_block
+						};
 
 
-void print_sector(BYTE* buffer)
+
+static int fetchFromSB(struct st_superBlock *sb)
 {
-	int i;
-	for(i=0;i<SECTOR_SIZE;i++){
-		debug_printf("0x%0X ", buffer[i]);
-	}
-	debug_printf("\n");
-}
+	Bitmap.numBlocks= sb->getNumBlocks();
+	Bitmap.size= 1 + (sb->getNumBlocks()-1)/8;
+	Bitmap.occupationBlocks= 1+(Bitmap.size-1)/(sb->getBlockSize());
+	Bitmap.startSector= sb->getStartSector() + sb->getSectorsPerBlock();
 
-int load_bitmap(super_block *sb)
-{
-	BYTE buffer[SECTOR_SIZE];
-	WORD sector= sb->startSector + sb->blockSize;
-	BitmapSize= sb->numBlocks/8;
-	numBlocks= sb->numBlocks;
-	Bitmap= malloc(BitmapSize);
-	BYTE *ptr= Bitmap;
-	if(Bitmap==NULL){
-		return -1;
-	}
-	while( (ptr-Bitmap) < BitmapSize){
-		debug_printf("debug read sector: %d.\n", sector);
-		if(read_sector (sector, buffer)!=0){
-			debug_printf("error trying to read in %s.\n", __FUNCTION__);
-			return -1;
-		}
-		print_sector(buffer);
-
-		if(  (&Bitmap[BitmapSize] - ptr) > SECTOR_SIZE){
-			debug_printf("1: ptr:%p Bitmap:%p", ptr, Bitmap);
-			memcpy(ptr, buffer, SECTOR_SIZE);
-		}else{
-			debug_printf("2: ptr:%p Bitmap:%p", ptr, Bitmap);
-			memcpy(ptr, buffer, (&Bitmap[BitmapSize] - ptr));
-		}
-		ptr+=SECTOR_SIZE;
-		sector++;
-	}
-
-	int i=0;
-	BYTE *dptr;
-	dptr= (BYTE*)Bitmap;
-	(void)dptr;
-	for(i=0;i<BitmapSize;i++){
-		if(i%4==0){
-			debug_printf(" 0x");
-		}
-		debug_printf("%02X",dptr[i]);
-	}
-	
-	return 0;
-}
-
-
-int bitmapInit(super_block *sb)
-{
-	numBlocks= sb->numBlocks;	
-	BitmapSize= sb->numBlocks/8;
-	Bitmap= malloc(BitmapSize);
-	if(Bitmap==NULL){
+	Bitmap.mem= malloc(Bitmap.size);
+	if(Bitmap.mem==NULL){
 		debug_printf("cant allocate in %s.\n", __FUNCTION__);
 		return -1;
 	}
-	memset(Bitmap, 0xFF, BitmapSize);
-	WORD numBitmapBlocks= 1+(BitmapSize-1)/(SECTOR_SIZE*sb->blockSize);
+	return 0;
+
+}
+
+static int init(struct st_superBlock *sb)
+{
+	if(fetchFromSB(sb) < 0){
+		return -1;
+	}
+
+	memset(Bitmap.mem, 0xFF, Bitmap.size);
 
 	//set superblock position to occupied
 	set_block_occupied(0);
 
 	WORD b;
 	//set numBitmapBlocks to occupied
-	for(b=1;b<1+numBitmapBlocks;b++){
+	for(b=1; b<1+Bitmap.occupationBlocks; b++){
 		set_block_occupied(b);
 	}
-	bitmap_flush(sb);
+	store();
 
 	return 0;
 }
 
+
+static int load(st_superBlock *sb)
+{
+	WORD sector;
+
+	if(fetchFromSB(sb) < 0){
+		return -1;
+	}
+ 	sector= Bitmap.startSector;
+
+	BYTE buffer[SECTOR_SIZE];
+	BYTE *ptr= Bitmap.mem;
+
+	while( (ptr-Bitmap.mem) < Bitmap.size){
+		debug_printf("debug read sector: %d.\n", sector);
+		if(read_sector (sector, buffer)!=0){
+			debug_printf("error trying to read in %s.\n", __FUNCTION__);
+			return -1;
+		}
+		//print_sector(buffer);
+
+		if( (&Bitmap.mem[Bitmap.size] - ptr) > SECTOR_SIZE){
+			debug_printf("1: ptr:%p Bitmap:%p", ptr, Bitmap);
+			memcpy(ptr, buffer, SECTOR_SIZE);
+		}else{
+			debug_printf("2: ptr:%p Bitmap:%p", ptr, Bitmap);
+			memcpy(ptr, buffer, (&Bitmap.mem[Bitmap.size] - ptr));
+		}
+		ptr+=SECTOR_SIZE;
+		sector++;
+	}
+
+#if 0
+	int i=0;
+	BYTE *dptr;
+	dptr= (BYTE*)Bitmap.mem;
+	(void)dptr;
+	for(i=0;i<Bitmap.size;i++){
+		if(i%4==0){
+			debug_printf(" 0x");
+		}
+		debug_printf("%02X",dptr[i]);
+	}
+#endif
+	return 0;
+}
+
+
+
+
 //save bitmap memory to disk
-void bitmap_flush(super_block *sb){
-	BYTE *ptr= Bitmap;
-	WORD sector= sb->startSector + sb->blockSize;
-	while( (ptr-Bitmap) < BitmapSize){
-		write_sector (sector, ptr);
+static void store(void)
+{
+	BYTE *ptr= Bitmap.mem;
+	WORD sector= Bitmap.startSector;
+	BYTE buffer[SECTOR_SIZE] = {0};
+
+	while( (ptr-Bitmap.mem) < Bitmap.size){
+		WORD remaining= Bitmap.mem+Bitmap.size-ptr;
+		if(remaining < SECTOR_SIZE){
+			memset(buffer, 0, SECTOR_SIZE);
+			memcpy(buffer, ptr, remaining);
+		}else{
+			memcpy(buffer, ptr, SECTOR_SIZE);
+		}
+		write_sector (sector, buffer);
 		ptr+=SECTOR_SIZE;
 		sector++;
 	}
 }
 
-int get_free_block(void)
+static int get_free_block(void)
 {
 	WORD block;
 	BYTE b_free;
 	WORD i;
-	for(i=0;i< BitmapSize;i++){
-		if(Bitmap[i]!=0x00){
+	for(i=0;i< Bitmap.size;i++){
+		if(Bitmap.mem[i]!=0x00){
 			for(block=0; block<8; block++){
-				b_free= (Bitmap[i] >> block) & 0x1;
+				b_free= (Bitmap.mem[i] >> block) & 0x1;
 				if(b_free){
-					return 8*i+ block;
+					int ret= 8*i+block;
+					mark_block(ret, BLOCK_OCCUPIED);
+					return ret;
 				}
 			}
 		}
@@ -118,31 +156,35 @@ int get_free_block(void)
 	return -1;
 }
 
-static int out_of_range(WORD block){
-	return (block >= numBlocks);
+static int out_of_range(WORD block)
+{
+	return (block >= Bitmap.numBlocks);
 
 }
 
-static int mark_block(WORD block, en_blockState val){
+static int mark_block(WORD block, en_blockState val)
+{
 	if(out_of_range(block)){
 		return -1;
 	}
 
 	if(val==BLOCK_FREE){
-		Bitmap[block/8] |= 1<<(block%8);
+		Bitmap.mem[block/8] |= 1<<(block%8);
 
 	}else{
-		Bitmap[block/8] &= ~(1<<(block%8));
+		Bitmap.mem[block/8] &= ~(1<<(block%8));
 	}
+	store();
 	return 0;
 }
 
-int set_block_free(WORD block){
+int bitmap_set_block_free(WORD block)
+{
 	return mark_block(block, BLOCK_FREE);
 }
 
-int set_block_occupied(WORD block){
+static int set_block_occupied(WORD block)
+{
 	return mark_block(block, BLOCK_OCCUPIED);
 }
-
 

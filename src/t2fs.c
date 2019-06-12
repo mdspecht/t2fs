@@ -1,129 +1,41 @@
 
 /**
 */
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
 #include "t2fs.h"
+#include "t2fs_aux.h"
+#include "mbr.h"
+#include "superBlock.h"
 #include "bitmap.h"
-#include "aux.h"
-#include "debug.h"
-
-super_block SuperBlock;
-
-BYTE Mounted=0;
-BYTE workBuffer[SECTOR_SIZE];
-extern BYTE *Bitmap;
-
-
-char *currPath=NULL;
-
-
-/*-----------------------------------------------------------------------------
-Função:	Realiza a montagem do sistema de arquivos T2FS.
------------------------------------------------------------------------------*/
-int mount(void){
-	BYTE *mbrBuffer = malloc(SECTOR_SIZE);
-	if (mbrBuffer==NULL){
-		debug_printf("error at alloc in %s.\n", __FUNCTION__);
-		return -1;
-	}
-
-	if(read_MBR(mbrBuffer)!=0){
-		return -1;
-	}
-
-	debug_printf("hello\n\n\n");
-	if(Mounted==0){
-		Mounted= 1;
-		load_superBlock( MBR_START_SECTOR(mbrBuffer), &SuperBlock);
-		print_SB(&SuperBlock);
-		load_bitmap(&SuperBlock);
-
-		currPath= malloc(SECTOR_SIZE*SuperBlock.blockSize);	
-		strcpy(currPath,"/");
-	}
-	return 0;
-}
+#include "dir.h"
+#include "t2fs_aux.h"
 
 /*-----------------------------------------------------------------------------
 Função:	Informa a identificação dos desenvolvedores do T2FS.
 -----------------------------------------------------------------------------*/
 int identify2 (char *name, int size) {
-    const char* names = "Jessica Maria Lorencetti - 228342\nMarcelo Dutra Specht - 230090\nRicardo de Araujo Coelho - 160542\n";
-    if(strlen(names)<=size){
-        strncpy(name,names,size);
-        return 0;
-    }
-    else{
-        return -1;
-    }
+	return -1;
 }
+
 /*-----------------------------------------------------------------------------
 Função:	Formata logicamente o disco virtual t2fs_disk.dat para o sistema de
 		arquivos T2FS definido usando blocos de dados de tamanho 
 		corresponde a um múltiplo de setores dados por sectors_per_block.
 -----------------------------------------------------------------------------*/
-int format2 (int sectors_per_block)
-{
-	BYTE *mbrBuffer = malloc(SECTOR_SIZE);
-	Mbr *mbr= (Mbr*)mbrBuffer;
-	super_block *sb= &SuperBlock;
-	if(mbrBuffer==NULL){
-		return -1;
-	}
-	if(read_MBR(mbrBuffer)!=0){
-		return -1;
-	}
-	sb->id[0]='J';
-	sb->id[1]='M';
-	sb->id[2]='R';
-	sb->id[3]='\0';
-	sb->blockSize= sectors_per_block;
-	sb->startSector= mbr->entry[0].startAddr;
-
-	sb->numBlocks= 1+ (mbr->entry[0].endAddr - mbr->entry[0].startAddr)/sb->blockSize;
-	debug_printf("numBlocks:: %d\n", sb->numBlocks);
-
-	bitmapInit(sb);
-
-	sb->root_IB= get_free_block();
-	if(sb->root_IB !=0){
-		printf("error at getting BI Block for root dir at %s\n.",__FUNCTION__);
-	}
-	
-
-	BYTE* blk_buffer= NULL;
-
-	sb->root_IB= IB_alloc(sb, blk_buffer);
-	if(sb->root_IB!=0){
+int format2 (int sectors_per_block) {
+	load_MBR();
+	if(check_params(&MBR, sectors_per_block)<0){
 		return -1;
 	}
 
-	fileEntry entry;
-	strcpy(entry.name, ".");
-	entry.fileType= FILE_DIR;
-	entry.index_block= sb->root_IB;
+	clear_partition(&MBR.entry[0]);
+	SB.init(&MBR.entry[0], sectors_per_block);
+	Bitmap.init(&SB);
+	root_init(&SB);
+	SB.store();
+	print_SB();
 
-	IB_add_Entry(sb, blk_buffer, &entry);
-
-	memset(entry.name, 0x00, MAX_FILE_NAME_SIZE);
-	strcpy(entry.name, "..");
-
-	IB_add_Entry(sb, blk_buffer, &entry);
-
-	blk_mem_to_disk(sb, blk_buffer, sb->root_IB);
-
-	superBlock_to_disk(sb);
-
-	currPath= malloc(SECTOR_SIZE*sb->blockSize);	
-	strcpy(currPath,"/");
-
-	debug_printf("exiting %s.\n",__FUNCTION__);
-	free(mbrBuffer);
 	return 0;
 }
-
 
 /*-----------------------------------------------------------------------------
 Função:	Função usada para criar um novo arquivo no disco e abrí-lo,
@@ -133,7 +45,7 @@ Função:	Função usada para criar um novo arquivo no disco e abrí-lo,
 		assumirá um tamanho de zero bytes.
 -----------------------------------------------------------------------------*/
 FILE2 create2 (char *filename) {
-	
+	t2fs_mount();
 	return -1;
 }
 
@@ -141,6 +53,7 @@ FILE2 create2 (char *filename) {
 Função:	Função usada para remover (apagar) um arquivo do disco. 
 -----------------------------------------------------------------------------*/
 int delete2 (char *filename) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -148,6 +61,7 @@ int delete2 (char *filename) {
 Função:	Função que abre um arquivo existente no disco.
 -----------------------------------------------------------------------------*/
 FILE2 open2 (char *filename) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -155,6 +69,7 @@ FILE2 open2 (char *filename) {
 Função:	Função usada para fechar um arquivo.
 -----------------------------------------------------------------------------*/
 int close2 (FILE2 handle) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -163,6 +78,7 @@ Função:	Função usada para realizar a leitura de uma certa quantidade
 		de bytes (size) de um arquivo.
 -----------------------------------------------------------------------------*/
 int read2 (FILE2 handle, char *buffer, int size) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -171,6 +87,7 @@ Função:	Função usada para realizar a escrita de uma certa quantidade
 		de bytes (size) de  um arquivo.
 -----------------------------------------------------------------------------*/
 int write2 (FILE2 handle, char *buffer, int size) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -180,6 +97,7 @@ Função:	Função usada para truncar um arquivo. Remove do arquivo
 		(current pointer), inclusive, até o seu final.
 -----------------------------------------------------------------------------*/
 int truncate2 (FILE2 handle) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -187,6 +105,7 @@ int truncate2 (FILE2 handle) {
 Função:	Altera o contador de posição (current pointer) do arquivo.
 -----------------------------------------------------------------------------*/
 int seek2 (FILE2 handle, DWORD offset) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -194,7 +113,7 @@ int seek2 (FILE2 handle, DWORD offset) {
 Função:	Função usada para criar um novo diretório.
 -----------------------------------------------------------------------------*/
 int mkdir2 (char *pathname) {
-
+	t2fs_mount();
 	return -1;
 }
 
@@ -202,6 +121,7 @@ int mkdir2 (char *pathname) {
 Função:	Função usada para remover (apagar) um diretório do disco.
 -----------------------------------------------------------------------------*/
 int rmdir2 (char *pathname) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -209,6 +129,7 @@ int rmdir2 (char *pathname) {
 Função:	Função usada para alterar o CP (current path)
 -----------------------------------------------------------------------------*/
 int chdir2 (char *pathname) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -216,6 +137,7 @@ int chdir2 (char *pathname) {
 Função:	Função usada para obter o caminho do diretório corrente.
 -----------------------------------------------------------------------------*/
 int getcwd2 (char *pathname, int size) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -223,6 +145,7 @@ int getcwd2 (char *pathname, int size) {
 Função:	Função que abre um diretório existente no disco.
 -----------------------------------------------------------------------------*/
 DIR2 opendir2 (char *pathname) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -230,6 +153,7 @@ DIR2 opendir2 (char *pathname) {
 Função:	Função usada para ler as entradas de um diretório.
 -----------------------------------------------------------------------------*/
 int readdir2 (DIR2 handle, DIRENT2 *dentry) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -237,6 +161,7 @@ int readdir2 (DIR2 handle, DIRENT2 *dentry) {
 Função:	Função usada para fechar um diretório.
 -----------------------------------------------------------------------------*/
 int closedir2 (DIR2 handle) {
+	t2fs_mount();
 	return -1;
 }
 
@@ -246,6 +171,7 @@ Função:	Função usada para criar um caminho alternativo (softlink) com
 		arquivo ou diretório fornecido por filename.
 -----------------------------------------------------------------------------*/
 int ln2 (char *linkname, char *filename) {
+	t2fs_mount();
 	return -1;
 }
 

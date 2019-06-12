@@ -1,15 +1,19 @@
-#ifndef BITMAP_H
-#define BITMAP_H
-
-#include "t2fs.h"
+#include "superBlock.h"
 
 typedef enum{BLOCK_OCCUPIED, BLOCK_FREE} en_blockState;
 
-int load_bitmap(super_block *sb);
-int bitmapInit(super_block *sb);
-void bitmap_flush(super_block *sb);
-int set_block_free(WORD block);
-int set_block_occupied(WORD block);
-int get_free_block(void);
+struct st_bitmap
+{
+	WORD numBlocks;			//numBlocks controled by the bitmap
+	WORD size;     			//bitmap size in bytes
+	WORD occupationBlocks;	//number of blocks that this bitmap occupies in disk
+	WORD startSector;		//startSector of bitmap
+	BYTE *mem;				//allocated area that stores the freeBlocks bitmap
+	int (*init)(struct st_superBlock *sb);
+	int (*load)(struct st_superBlock *sb);
+	void (*store)(void);
+	int (*getFreeBlock)(void);
+	int (*markBlock)(WORD block, en_blockState val);
+};
 
-#endif
+extern struct st_bitmap Bitmap;

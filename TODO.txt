@@ -1,0 +1,10 @@
+
+Verificar se mount está correto;
+
+criar função q percorre o path no disco até achar um arquivo.
+(comportamento diferente para links).
+
+implementar o 'cd', para alterar o current directory.
+
+criar e salvar arquivos
+
