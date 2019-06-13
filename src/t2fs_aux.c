@@ -37,11 +37,19 @@ int check_params(stMbr *mbr, WORD sectors_per_block)
 //Initialize all FS structures
 void t2fs_mount(void)
 {
+	printf("%s: entered.\n", __FUNCTION__);
 	if(!mounted){
 		mounted=1;
 
+		printf("teste1\n");
 		load_MBR();
+		printf("teste2\n");
+
 		SB.load(MBR.entry[0].startSector);
+		printf("teste3\n");
+
+		print_SB();
+		printf("teste4\n");
 		
 		memset(OpenedFiles, 0x00, sizeof(OpenedFiles));
 		memset(OpenedDirs, 0x00, sizeof(OpenedFiles));
@@ -49,6 +57,9 @@ void t2fs_mount(void)
 //		EmptyBlock= calloc(1, SB.getBlockSize());
 
 		Bitmap.load(&SB);
+
+		Bitmap.print();
+		printf("teste5\n");
 
 		root_load();
 	}

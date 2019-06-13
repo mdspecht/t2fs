@@ -4,7 +4,7 @@
 
 int main(void)
 {
-	int ret= format2(2);
+	int ret= format2(4);
 //	int ret=0;
 //	mount();
 	printf("ret_val: %d\n", ret);

@@ -35,10 +35,12 @@ void print_MBR(stMbr *mbr)
 
 int load_MBR(void)
 {
-	if(read_sector(0, (BYTE*)&MBR)!=0){
+	BYTE buffer[SECTOR_SIZE];
+	if(read_sector(0, buffer)!=0){
 		debug_printf("error at %s\n",__FUNCTION__);
 		return -1;
 	}
+	memcpy(&MBR, buffer, sizeof(MBR));
 	print_MBR(&MBR);
 	return 0;
 }

@@ -82,38 +82,47 @@ struct IterationCtrl
 
 };
 
+#define IB_ITERATOR_NEXT	0
+#define IB_ITERATOR_INIT	1
+
 #define LAST_IB_POSITION 	(SB.getBlockSize()/sizeof(dirRecordDisk)-1)
 //iterate over index_block, returning a pointer to data_block
-BYTE* IB_iterator(struct IterationCtrl *it, char init)
+BYTE* IB_iterator(struct IterationCtrl *it, char state)
 {
-	if(init){
-		it->IB_buffer= malloc(SB.getBlockSize());
-		it->data_buffer= malloc(SB.getBlockSize());
-		block_disk_to_mem(it->block, it->IB_buffer);
-		it->currEntry=0;
-		return NULL;
-	}else{
-		WORD dataBlock= ((WORD *)it->IB_buffer)[it->currEntry];
-
-		if(it->currEntry == LAST_IB_POSITION && dataBlock!=0){
-			block_disk_to_mem(dataBlock, it->IB_buffer);
+	switch(state){
+		case IB_ITERATOR_INIT:
+			it->IB_buffer= malloc(SB.getBlockSize());
+			it->data_buffer= malloc(SB.getBlockSize());
+			block_disk_to_mem(it->block, it->IB_buffer);
 			it->currEntry=0;
-			dataBlock= ((WORD *)it->IB_buffer)[it->currEntry];
-		}
-		if(dataBlock==0){
-			//finished all entries
-			free(it->IB_buffer);
-			free(it->data_buffer);
-			return NULL;
-		}
-		block_disk_to_mem(dataBlock, it->data_buffer);
-		it->currEntry++;
-		return it->data_buffer;
+			break;
+
+		case IB_ITERATOR_NEXT:
+			{
+				WORD dataBlock= ((WORD *)it->IB_buffer)[it->currEntry];
+
+				if(it->currEntry == LAST_IB_POSITION && dataBlock!=0){
+					block_disk_to_mem(dataBlock, it->IB_buffer);
+					it->currEntry=0;
+					dataBlock= ((WORD *)it->IB_buffer)[it->currEntry];
+				}
+				if(dataBlock==0){
+					//finished all entries
+					free(it->IB_buffer);
+					free(it->data_buffer);
+					return NULL;
+				}
+				block_disk_to_mem(dataBlock, it->data_buffer);
+				it->currEntry++;
+				return it->data_buffer;
+			}
 	}
+	return NULL;
 }
 
 
 #define MAX_RECORDS_PER_DATA_BLOCK		(SB.getBlockSize()/sizeof(dirRecordDisk))
+
 
 /* dir_copy_disk_records:
  * Dado um index_node de um diretorio, varre todos os blocos de dados e coleta
@@ -137,15 +146,20 @@ struct dirRecordNode * dir_copy_disk_records(WORD block, struct dirRecordNode *n
 		it_node=it_node->next;
 	}
 
-	IB_iterator(&it, 1);
+	debug_printf("%s, 1: \n",__FUNCTION__);
+	IB_iterator(&it, IB_ITERATOR_INIT);
 
-	while((data_buffer= IB_iterator(&it,0))!=NULL){
+	while((data_buffer= IB_iterator(&it,IB_ITERATOR_NEXT))!=NULL){
 		dirRecordDisk *rec;
+		rec= (dirRecordDisk*)data_buffer;
+		int i;
+		debug_printf("%s, 2: MAX_RECS_PER_DATA_BLOCK: %d\n",__FUNCTION__, MAX_RECORDS_PER_DATA_BLOCK);
+		for(i=0; i < MAX_RECORDS_PER_DATA_BLOCK; i++){
+			debug_printf("%s, 3: rec[%d].index_block: %d\n",__FUNCTION__, i, rec[i].index_block);
 
-		for(rec= (dirRecordDisk*)data_buffer; (BYTE*)rec-data_buffer< MAX_RECORDS_PER_DATA_BLOCK; rec++){
-			if(rec->index_block!=0){
+			if(rec[i].index_block!=0){
 				struct dirRecordNode* newNode= malloc(sizeof(struct dirRecordNode));
-				memcpy(&(newNode->entry), rec, sizeof(dirRecordDisk));
+				memcpy(&(newNode->entry), &rec[i], sizeof(dirRecordDisk));
 
 				newNode->next=NULL;
 				if(it_node==NULL){
@@ -157,8 +171,8 @@ struct dirRecordNode * dir_copy_disk_records(WORD block, struct dirRecordNode *n
 				}
 			}
 		}
-		free(data_buffer);
 	}
+	debug_printf("%s: 4\n", __FUNCTION__);
 	return ret_node;
 }
 
@@ -227,7 +241,7 @@ void dir_store(dirDescriptor *dir)
 		if(i==MAX_RECORDS_PER_DATA_BLOCK){
 			printf("%s: max_records_per_data_block(i=%d).\n", __FUNCTION__, i);
 			printf("%s: size: %d\n",__FUNCTION__, SB.getBlockSize());
-			printf("%s: dirRecordDiskSize: %ld\n",__FUNCTION__, sizeof(dirRecordDisk));
+			printf("%s: dirRecordDiskSize: %d\n",__FUNCTION__, sizeof(dirRecordDisk));
 			//save this datablock in disk...
 			WORD data_index= Bitmap.getFreeBlock();
 			block_mem_to_disk(data_index, dataBuffer.buffer);
@@ -311,18 +325,44 @@ int root_init(st_superBlock *sb)
 	return 0;
 }
 
+void print_dir(const dirDescriptor *dir)
+{
+	printf("%s:\n", __FUNCTION__);
+	printf("\tdir->name       : %s\n", dir->name);
+	printf("\tdir->indexBlock : %d\n", dir->indexBlock);
+	printf("\tdir->numRecords : %d\n", dir->numRecords);
+	dirRecordNode * tmpRec= dir->firstRecord;
+	int i=0;
+	while(tmpRec){
+		printf("\tentry[%d]: \n",i);
+		printf("\t\tindexBlock			   : %d\n", tmpRec->entry.index_block);
+		printf("\t\tname                   : %s\n", tmpRec->entry.attr.name);
+		printf("\t\ttype[1:regular, 2:dir] : %d\n", tmpRec->entry.attr.fileType);
+		printf("\t\tfileSize               : %d\n", tmpRec->entry.attr.fileSize);
+		tmpRec= tmpRec->next;
+		i++;
+	}
+}	
 
 void root_load(void)
 {
 	BYTE *rootIndexBlockBuffer= malloc(SB.getBlockSize());
 	
+	printf("%s: 1\n", __FUNCTION__);
 	strncpy(RootDescriptor.name, "/", MAX_FILE_NAME_SIZE);
 
 	block_disk_to_mem(SB.getRootIndexBlock(), rootIndexBlockBuffer);
+	RootDescriptor.indexBlock= SB.getRootIndexBlock();
    	RootDescriptor.numRecords= dir_count_entries(rootIndexBlockBuffer);
+	printf("%s: 2\n",  __FUNCTION__);
+	printf("%s: Root num Records: %d\n",  __FUNCTION__, RootDescriptor.numRecords);
 	
-	dir_copy_disk_records(SB.getRootIndexBlock(), RootDescriptor.firstRecord);
+	printf("%s: calling dir_copy_disk(%d, %p)\n",  __FUNCTION__, SB.getRootIndexBlock(), RootDescriptor.firstRecord );
+	RootDescriptor.firstRecord= dir_copy_disk_records(SB.getRootIndexBlock(), RootDescriptor.firstRecord);
 
+	print_dir(&RootDescriptor);
+
+	printf("%s: 3\n",  __FUNCTION__);
 	RootDescriptor.currRecordOffset= 0;
 	RootDescriptor.currRecord= RootDescriptor.firstRecord;
 

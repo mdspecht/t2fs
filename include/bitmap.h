@@ -14,6 +14,7 @@ struct st_bitmap
 	void (*store)(void);
 	int (*getFreeBlock)(void);
 	int (*markBlock)(WORD block, en_blockState val);
+	void (*print)(void);
 };
 
 extern struct st_bitmap Bitmap;

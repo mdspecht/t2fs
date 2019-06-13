@@ -4,8 +4,8 @@
 #include "apidisk.h"
 #include "bitmap.h"
 
-
 #include "debug.h"
+#define debug_printf printf
 
 static int init(struct st_superBlock *sb);
 static int load(st_superBlock *sb);
@@ -13,6 +13,7 @@ static int set_block_occupied(WORD block);
 static void store(void);
 static int get_free_block(void);
 static int mark_block(WORD block, en_blockState val);
+static void print(void);
 
 struct st_bitmap Bitmap={ 	.numBlocks			= 0,	
 							.size				= 0,	
@@ -23,9 +24,28 @@ struct st_bitmap Bitmap={ 	.numBlocks			= 0,
 							.load				= load,
 							.store				= store,
 							.getFreeBlock		= get_free_block,
-							.markBlock			= mark_block
+							.markBlock			= mark_block,
+							.print				= print
 						};
 
+
+static void print(void)
+{
+	debug_printf("BITMAP:\n");
+	debug_printf("      Numblocks   :%d\n",Bitmap.numBlocks);
+	debug_printf("      Size        :%d\n",Bitmap.size);			
+	debug_printf("      occupancy   :%d\n",Bitmap.occupationBlocks);	
+	debug_printf("      startSector :%d\n",Bitmap.startSector);	
+	debug_printf("      mem:\n");
+	int i;
+	for(i=0;i<Bitmap.size;i++){
+		if(i%2==0) debug_printf(" ");
+		if(i%16==0) debug_printf("\n%04x: ", i);
+		debug_printf("%02x",Bitmap.mem[i]);
+	}	
+	printf("\n");
+
+}
 
 
 static int fetchFromSB(struct st_superBlock *sb)
@@ -87,10 +107,11 @@ static int load(st_superBlock *sb)
 		//print_sector(buffer);
 
 		if( (&Bitmap.mem[Bitmap.size] - ptr) > SECTOR_SIZE){
-			debug_printf("1: ptr:%p Bitmap:%p", ptr, Bitmap);
+			debug_printf("1: ptr:%p Bitmap.mem:%p", ptr, Bitmap.mem);
 			memcpy(ptr, buffer, SECTOR_SIZE);
 		}else{
-			debug_printf("2: ptr:%p Bitmap:%p", ptr, Bitmap);
+			debug_printf("2: ptr:%p Bitmap.mem:%p\n", ptr, Bitmap.mem);
+			debug_printf("2: copySize:%d\n", (&Bitmap.mem[Bitmap.size] - ptr));
 			memcpy(ptr, buffer, (&Bitmap.mem[Bitmap.size] - ptr));
 		}
 		ptr+=SECTOR_SIZE;
